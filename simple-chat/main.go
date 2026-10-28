@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
@@ -60,13 +61,14 @@ func main() {
 					Content: responses.ResponseInputMessageContentListParam{{OfInputText: &responses.ResponseInputTextParam{Text: input}}},
 				},
 			})
-
+			start := time.Now()
 			resp, err := openaiClient.Responses.New(context.Background(), responses.ResponseNewParams{
 				Model: openai.ChatModelGPT6Luna,
 				Input: responses.ResponseNewParamsInputUnion{
 					OfInputItemList: inputList,
 				},
 			})
+			latency := time.Since(start)
 
 			if err != nil {
 				fmt.Printf("Erro ao criar resposta: %v\n", err)
@@ -77,6 +79,7 @@ func main() {
 
 			fmt.Fprintln(os.Stdout, "Agente:", outputText)
 			fmt.Fprintln(os.Stdout, "tokens usados:", resp.Usage.TotalTokens)
+			fmt.Fprintln(os.Stdout, "latência:", latency)
 			tokenCount += resp.Usage.TotalTokens
 
 			inputList = append(inputList, responses.ResponseInputItemUnionParam{
