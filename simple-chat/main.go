@@ -9,24 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fatih/color"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 )
 
 func main() {
-	b, err := os.ReadFile(".env")
-	if err != nil {
-		fmt.Printf("Erro ao ler arquivo .env: %v\n", err)
-		os.Exit(1)
-	}
-
-	lines := strings.SplitSeq(string(b), "\n")
-	for line := range lines {
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			os.Setenv(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
-		}
-	}
+	loadEnvFile(".env")
 
 	openaiClient := openai.NewClient(openai.DefaultClientOptions()...)
 
@@ -45,7 +34,7 @@ func main() {
 	go func() {
 		for {
 			reader := bufio.NewReader(os.Stdin)
-			fmt.Fprint(os.Stdout, "Você: ")
+			fmt.Fprint(os.Stdout, color.GreenString("Você: "))
 
 			input, err := reader.ReadString('\n')
 			if err != nil {
@@ -61,36 +50,65 @@ func main() {
 					Content: responses.ResponseInputMessageContentListParam{{OfInputText: &responses.ResponseInputTextParam{Text: input}}},
 				},
 			})
+
 			start := time.Now()
-			resp, err := openaiClient.Responses.New(context.Background(), responses.ResponseNewParams{
+			stream := openaiClient.Responses.NewStreaming(context.Background(), responses.ResponseNewParams{
 				Model: openai.ChatModelGPT6Luna,
 				Input: responses.ResponseNewParamsInputUnion{
 					OfInputItemList: inputList,
 				},
 			})
-			latency := time.Since(start)
 
-			if err != nil {
-				fmt.Printf("Erro ao criar resposta: %v\n", err)
-				os.Exit(1)
+			fmt.Fprintln(os.Stdout)
+			fmt.Fprint(os.Stdout, color.CyanString("Agente: "))
+			stokens := int64(0)
+			var finalText strings.Builder
+			for stream.Next() {
+				resp := stream.Current().Response
+				outputText := resp.OutputText()
+				finalText.WriteString(outputText)
+
+				fmt.Fprint(os.Stdout, outputText)
+				tokenCount += resp.Usage.TotalTokens
+				stokens += resp.Usage.TotalTokens
 			}
 
-			outputText := resp.OutputText()
-
-			fmt.Fprintln(os.Stdout, "Agente:", outputText)
-			fmt.Fprintln(os.Stdout, "tokens usados:", resp.Usage.TotalTokens)
-			fmt.Fprintln(os.Stdout, "latência:", latency)
-			tokenCount += resp.Usage.TotalTokens
+			if stream.Err() != nil {
+				fmt.Printf("Erro ao criar resposta: %v\n", stream.Err())
+				os.Exit(1)
+			}
 
 			inputList = append(inputList, responses.ResponseInputItemUnionParam{
 				OfInputMessage: &responses.ResponseInputItemMessageParam{
 					Role:    "system",
-					Content: responses.ResponseInputMessageContentListParam{{OfInputText: &responses.ResponseInputTextParam{Text: outputText}}},
+					Content: responses.ResponseInputMessageContentListParam{{OfInputText: &responses.ResponseInputTextParam{Text: finalText.String()}}},
 				},
 			})
+
+			fmt.Fprintln(os.Stdout)
+
+			fmt.Fprintln(os.Stdout, color.YellowString("tokens usados: %d", stokens))
+			fmt.Fprintln(os.Stdout, color.YellowString("latência: %s", time.Since(start)))
+			fmt.Fprintln(os.Stdout)
 		}
 	}()
 
 	<-signalChan
 	fmt.Fprintln(os.Stdout, "\nInterrupção recebida. Encerrando...")
+}
+
+func loadEnvFile(filename string) {
+	b, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("Erro ao ler arquivo .env: %v\n", err)
+		os.Exit(1)
+	}
+
+	lines := strings.SplitSeq(string(b), "\n")
+	for line := range lines {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			os.Setenv(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		}
+	}
 }
