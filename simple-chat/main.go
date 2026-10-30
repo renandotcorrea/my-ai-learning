@@ -31,6 +31,9 @@ func main() {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
 
+	sessionkey := "my-cache-session-key"
+	previouResponseID := ""
+
 	go func() {
 		for {
 			reader := bufio.NewReader(os.Stdin)
@@ -54,14 +57,23 @@ func main() {
 			start := time.Now()
 			stream := openaiClient.Responses.NewStreaming(context.Background(), responses.ResponseNewParams{
 				Model: openai.ChatModelGPT6Luna,
+				Instructions: openai.String(`Você é um assistente de inteligência artificial que ajuda os usuários a decidir qual item comprar. 
+					Você compara diferentes opções com base em suas características, preços e benefícios. Sempre forneça recomendações imparciais e detalhadas.
+					Sempre tente entender completamente as necessidades do usuário antes de fornecer uma recomendação. Ao recomendar um item, explique claramente os motivos da escolha e compare com outras opções disponíveis.
+					Trafa também os prós e contras de cada opção.`),
 				Input: responses.ResponseNewParamsInputUnion{
 					OfInputItemList: inputList,
+				},
+				PromptCacheKey: openai.String(sessionkey),
+				PromptCacheOptions: responses.ResponseNewParamsPromptCacheOptions{
+					Mode: "implicit",
 				},
 			})
 
 			fmt.Fprintln(os.Stdout)
 			fmt.Fprint(os.Stdout, color.CyanString("Agente: "))
 			stokens := int64(0)
+			cachedTokens := int64(0)
 			var finalText strings.Builder
 			for stream.Next() {
 				resp := stream.Current().Response
@@ -69,8 +81,14 @@ func main() {
 				finalText.WriteString(outputText)
 
 				fmt.Fprint(os.Stdout, outputText)
-				tokenCount += resp.Usage.TotalTokens
-				stokens += resp.Usage.TotalTokens
+
+				if stream.Current().Type == "response.completed" {
+					tokenCount += resp.Usage.TotalTokens
+					stokens += resp.Usage.TotalTokens
+					cachedTokens += resp.Usage.InputTokensDetails.CachedTokens
+					cachedTokens += resp.Usage.InputTokensDetails.CacheWriteTokens
+					previouResponseID = resp.ID
+				}
 			}
 
 			if stream.Err() != nil {
@@ -78,17 +96,17 @@ func main() {
 				os.Exit(1)
 			}
 
-			inputList = append(inputList, responses.ResponseInputItemUnionParam{
-				OfInputMessage: &responses.ResponseInputItemMessageParam{
-					Role:    "system",
-					Content: responses.ResponseInputMessageContentListParam{{OfInputText: &responses.ResponseInputTextParam{Text: finalText.String()}}},
-				},
-			})
+			inputList = append(inputList, responses.ResponseInputItemParamOfMessage(
+				finalText.String(),
+				responses.EasyInputMessageRoleAssistant,
+			))
 
 			fmt.Fprintln(os.Stdout)
 
 			fmt.Fprintln(os.Stdout, color.YellowString("tokens usados: %d", stokens))
+			fmt.Fprintln(os.Stdout, color.YellowString("tokens em cache: %d", cachedTokens))
 			fmt.Fprintln(os.Stdout, color.YellowString("latência: %s", time.Since(start)))
+			fmt.Fprintln(os.Stdout, color.YellowString("ID da resposta anterior: %s", previouResponseID))
 			fmt.Fprintln(os.Stdout)
 		}
 	}()
