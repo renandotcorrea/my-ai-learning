@@ -60,12 +60,18 @@ func (a *Agent) addToHistory(input string, role responses.EasyInputMessageRole) 
 	a.History = append(a.History, responses.ResponseInputItemParamOfMessage(input, role))
 }
 
+func (a *Agent) addRawToHistory(item responses.ResponseInputItemUnionParam) {
+	a.History = append(a.History, item)
+}
+
 func (a *Agent) IncrementTokenCount(count int64) {
 	a.TokenCount += count
 }
 
-func (a *Agent) Call(ctx context.Context, input string) error {
-	a.addToHistory(input, responses.EasyInputMessageRoleUser)
+func (a *Agent) Call(ctx context.Context, input string, readUserInput *bool) error {
+	if *readUserInput {
+		a.addToHistory(input, responses.EasyInputMessageRoleUser)
+	}
 
 	tools := []responses.ToolUnionParam{}
 	for _, tool := range a.Tools {
@@ -86,6 +92,7 @@ func (a *Agent) Call(ctx context.Context, input string) error {
 	a.IncrementTokenCount(resp.Usage.TotalTokens)
 
 	var outputText strings.Builder
+	toolResult := []responses.ResponseInputItemUnionParam{}
 	for _, v := range resp.Output {
 		fmt.Println("Processing output item of type:", v.Type)
 		switch v.Type {
@@ -94,20 +101,30 @@ func (a *Agent) Call(ctx context.Context, input string) error {
 				outputText.WriteString(c.Text)
 			}
 		case "function_call":
-			outputText.WriteString(fmt.Sprintf("Function called: %s\n", v.AsFunctionCall().Name))
-			if tool, ok := a.Tools[v.AsFunctionCall().Name]; ok {
-				val, err := tool.Function(json.RawMessage(v.AsFunctionCall().Arguments))
-				if err != nil {
-					fmt.Fprintf(&outputText, "Error executing tool: %s\n", err)
-				} else {
-					fmt.Fprintf(&outputText, "Tool result: %s\n", val)
-				}
+			call := v.AsFunctionCall()
+			fmt.Fprintf(&outputText, "Function called: %s\n", call.Name)
+
+			a.addRawToHistory(responses.ResponseInputItemParamOfFunctionCall(call.Arguments, call.CallID, call.Name))
+
+			toolRes := a.executeTool(call.Name, json.RawMessage(call.Arguments))
+			if toolRes.OfFunctionCallOutput != nil {
+				toolRes.OfFunctionCallOutput.CallID = openai.String(call.CallID)
 			}
+			toolResult = append(toolResult, toolRes)
 		}
 	}
 
-	a.addToHistory(outputText.String(), responses.EasyInputMessageRoleAssistant)
-	fmt.Fprintln(os.Stdout, color.CyanString("Agente: "), outputText.String())
+	if len(toolResult) == 0 {
+		a.addToHistory(outputText.String(), responses.EasyInputMessageRoleAssistant)
+		fmt.Fprintln(os.Stdout, color.CyanString("Agente: "), outputText.String())
+		*readUserInput = true
+	} else {
+		for _, tr := range toolResult {
+			a.addRawToHistory(tr)
+			fmt.Fprintf(os.Stdout, "%s: %#v\n", color.CyanString("Tool result: "), tr)
+		}
+		*readUserInput = false
+	}
 	return nil
 }
 
@@ -115,9 +132,13 @@ func (a *Agent) Run() error {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
 	go func() {
+		readUserInput := true
 		for {
-			input := getInput()
-			if err := a.Call(context.Background(), input); err != nil {
+			input := ""
+			if readUserInput {
+				input = getInput()
+			}
+			if err := a.Call(context.Background(), input, &readUserInput); err != nil {
 				fmt.Fprintln(os.Stderr, "Erro ao chamar o agente:", err)
 				break
 			}
@@ -126,4 +147,18 @@ func (a *Agent) Run() error {
 	<-signalChan
 	fmt.Fprintln(os.Stdout, "Interrupção recebida. Encerrando...")
 	return nil
+}
+
+func (a *Agent) executeTool(name string, args json.RawMessage) responses.ResponseInputItemUnionParam {
+	if tool, ok := a.Tools[name]; ok {
+		fmt.Fprintf(os.Stdout, "%s: %s(%s)\n", color.CyanString("Tool: "), name, string(args))
+
+		v, err := tool.Function(args)
+		if err != nil {
+			return responses.ResponseInputItemParamOfFunctionCallOutput(err.Error())
+		}
+		return responses.ResponseInputItemParamOfFunctionCallOutput(v)
+	}
+
+	return responses.ResponseInputItemParamOfFunctionCallOutput(fmt.Sprintf("tool not found: %s", name))
 }
