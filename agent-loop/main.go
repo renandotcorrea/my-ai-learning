@@ -23,7 +23,7 @@ func main() {
 	signal.Notify(signalChan, os.Interrupt)
 
 	toolMap := make(map[string]Tool)
-	for _, tool := range []Tool{ListFilesTool, ReadFileTool} {
+	for _, tool := range []Tool{ListFilesTool, ReadFileTool, LinesCountTool} {
 		toolMap[tool.Name] = tool
 	}
 
@@ -112,7 +112,12 @@ func (a *Agent) Call(ctx context.Context, input string, readUserInput *bool) err
 		case "reasoning":
 			// Handle reasoning output if needed
 			// For now, just print it
-			fmt.Fprintf(os.Stdout, "Reasoning: %v\n", v.AsReasoning())
+			r := v.AsReasoning()
+			fmt.Fprintf(os.Stdout, "%s", color.CyanString("Reasoning: "))
+			for _, c := range r.Content {
+				fmt.Fprintf(os.Stdout, "%s\n", c.Text)
+			}
+			fmt.Fprintln(os.Stdout)
 		}
 	}
 
@@ -123,7 +128,7 @@ func (a *Agent) Call(ctx context.Context, input string, readUserInput *bool) err
 	} else {
 		for _, tr := range toolResult {
 			a.addRawToHistory(tr)
-			fmt.Fprintf(os.Stdout, "%s: %#v\n", color.CyanString("Tool result: "), tr)
+			//fmt.Fprintf(os.Stdout, "%s: %#v\n", color.CyanString("Tool result: "), tr)
 		}
 		*readUserInput = false
 	}
