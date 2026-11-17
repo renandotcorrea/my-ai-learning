@@ -23,7 +23,7 @@ func main() {
 	signal.Notify(signalChan, os.Interrupt)
 
 	toolMap := make(map[string]Tool)
-	for _, tool := range []Tool{ListFilesTool, ReadFileTool, LinesCountTool} {
+	for _, tool := range []Tool{ListFilesTool, ReadFileTool, LinesCountTool, EditFileTool} {
 		toolMap[tool.Name] = tool
 	}
 
@@ -109,19 +109,10 @@ func (a *Agent) Call(ctx context.Context, input string, readUserInput *bool) err
 				toolRes.OfFunctionCallOutput.CallID = openai.String(call.CallID)
 			}
 			toolResult = append(toolResult, toolRes)
-		case "reasoning":
-			// Handle reasoning output if needed
-			// For now, just print it
-			r := v.AsReasoning()
-			fmt.Fprintf(os.Stdout, "%s", color.CyanString("Reasoning: "))
-			for _, c := range r.Content {
-				fmt.Fprintf(os.Stdout, "%s\n", c.Text)
-			}
-			fmt.Fprintln(os.Stdout)
 		}
 	}
 
-	if len(toolResult) == 0 {
+	if len(toolResult) == 0 && outputText.Len() > 0 {
 		a.addToHistory(outputText.String(), responses.EasyInputMessageRoleAssistant)
 		fmt.Fprintln(os.Stdout, color.CyanString("Agente: "), outputText.String())
 		*readUserInput = true
