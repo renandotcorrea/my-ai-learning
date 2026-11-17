@@ -23,7 +23,7 @@ func main() {
 	signal.Notify(signalChan, os.Interrupt)
 
 	toolMap := make(map[string]Tool)
-	for _, tool := range []Tool{ListFilesTool} {
+	for _, tool := range []Tool{ListFilesTool, ReadFileTool} {
 		toolMap[tool.Name] = tool
 	}
 
@@ -48,10 +48,8 @@ func NewAgent(client *openai.Client, tools map[string]Tool) *Agent {
 		Client:  client,
 		History: []responses.ResponseInputItemUnionParam{},
 		Tools:   tools,
-		Instructions: `Você é um assistente de inteligência artificial que ajuda os usuários a decidir qual item comprar. 
-					Você compara diferentes opções com base em suas características, preços e benefícios. Sempre forneça recomendações imparciais e detalhadas.
-					Sempre tente entender completamente as necessidades do usuário antes de fornecer uma recomendação. Ao recomendar um item, explique claramente os motivos da escolha e compare com outras opções disponíveis.
-					Trafa também os prós e contras de cada opção.`,
+		Instructions: `Você é um assistente de inteligência artificial que ajuda os usuários a interagir com arquivos e diretórios no sistema.
+		Sempre forneça respostas claras e detalhadas sobre as operações realizadas.`,
 		TokenCount: 0,
 	}
 }
@@ -111,6 +109,10 @@ func (a *Agent) Call(ctx context.Context, input string, readUserInput *bool) err
 				toolRes.OfFunctionCallOutput.CallID = openai.String(call.CallID)
 			}
 			toolResult = append(toolResult, toolRes)
+		case "reasoning":
+			// Handle reasoning output if needed
+			// For now, just print it
+			fmt.Fprintf(os.Stdout, "Reasoning: %v\n", v.AsReasoning())
 		}
 	}
 

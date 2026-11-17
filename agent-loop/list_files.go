@@ -8,7 +8,7 @@ import (
 
 var ListFilesTool = Tool{
 	Name:        "list_files",
-	Description: "Lists all files in the current directory",
+	Description: "Lists all files in the specified directory. Defaults to the current directory if no path is provided. Use it to explore the contents of any directory on your system.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
